@@ -85,33 +85,26 @@ impl<T> Matrix for DMatrix<T> {
     }
 }
 
-impl<T> Add<Self> for DMatrix<T> where T: Add<T, Output = T> + Clone {
-    type Output = Self;
+impl<T> Add<&Self> for &DMatrix<T> where for <'a> &'a T: Add<&'a T, Output = T> {
+    type Output = DMatrix<T>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        self.checked_add(&rhs).expect("DMatrix dimensions do not match for addition.")
+        self.checked_add(rhs).expect("DMatrix dimensions do not match for addition.")
     }
 }
 
-impl<T> CheckedAdd for DMatrix<T> where T: Add<Output= T> + Clone {
+impl<T> CheckedAdd for DMatrix<T>
+    where for <'a> &'a T: Add<&'a T, Output = T>{
     fn checked_add(&self, other: &Self) -> Option<Self> {
         if (self.rows != other.rows || self.cols != other.cols) {
             None
         } else {
             let data = self.data.iter()
                 .zip(other.data.iter())
-                .map(|(a, b)| a.clone() + b.clone())
+                .map(|(a, b)| a + b)
                 .collect();
             Some(DMatrix { rows: self.rows, cols: self.cols, data })
         }
-    }
-}
-
-impl<T> Add<Self> for &DMatrix<T> where T: Add<T, Output = T> + Clone {
-    type Output = DMatrix<T>;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        self.checked_add(&rhs).expect("DMatrix dimensions do not match for addition.")
     }
 }
 
@@ -123,11 +116,156 @@ impl<T> DMatrix<T> {
         DMatrix { rows: self.rows, cols: self.cols, data }
     }
 
-    pub fn mul<J, O>(&self, rhs: &DMatrix<J>) -> Result<DMatrix<O>, MatrixError>
-    where T: Mul<J, Output = O>,
-        J: Mul<J, Output = J> + Clone,
-        O: Mul<J, Output = O> + Clone
+    pub fn mul<M, O>(&self, rhs: &M) -> Result<DMatrix<O>, MatrixError>
+    where
+        M: Matrix,
+        for<'a> &'a T: Mul<&'a M::Item, Output = O>,
+        O: Add<Output = O> + Zero
     {
+        if self.cols != rhs.rows() {
+            return Err(MatrixError::DimensionMismatch(self.rows, self.cols, rhs.rows(), rhs.cols()));
+        }
+        // actually do matrix mult
+        // initiate a resulting vec we will just flat store stuff. as ez to calculate.
+        let mut vec = Vec::<O>::with_capacity(self.rows * rhs.cols());
+        for i in 0..self.rows {
+            for j in 0..rhs.cols() {
+                let mut sum = O::zero();
+                for k in 0..self.cols() {
+                    let a = self.get(i, j).unwrap();
+                    let b = rhs.get(k, j).unwrap();
+                    sum = sum + (a * b)
+                }
+                vec.push(sum);
+            }
+        }
+        Ok(DMatrix {rows: self.rows, cols: rhs.cols(), data: vec})
+    }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*; // Imports DMatrix, Matrix trait, etc.
+
+    #[test]
+    fn test_new_constructor() {
+        let m = DMatrix::new(2, 3, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(m.rows(), 2);
+        assert_eq!(m.cols(), 3);
+        assert_eq!(m.data, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_new_constructor_panic() {
+        // Data length (5) does not match rows * cols (6)
+        DMatrix::new(2, 3, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_zeros_constructor() {
+        let m: DMatrix<i32> = DMatrix::zeros(2, 2);
+        assert_eq!(m.data, vec![0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_identity_constructor() {
+        let m = DMatrix::<i32>::identity(3);
+        assert_eq!(m.rows, 3);
+        assert_eq!(m.cols, 3);
+        assert_eq!(m.data, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn test_get_and_set() {
+        let mut m = DMatrix::new(2, 2, vec![1, 2, 3, 4]);
+        assert_eq!(m.get(0, 1), Some(&2));
+        assert_eq!(m.get(1, 0), Some(&3));
+        assert_eq!(m.get(2, 0), None); // Out of bounds
+
+        let res = m.set(1, 1, &99);
+        assert!(res.is_ok());
+        assert_eq!(m.get(1, 1), Some(&99));
+
+        let err_res = m.set(2, 2, &0);
+        assert!(err_res.is_err());
+    }
+
+    #[test]
+    fn test_checked_add() {
+        let a = DMatrix::new(2, 2, vec![1, 2, 3, 4]);
+        let b = DMatrix::new(2, 2, vec![5, 6, 7, 8]);
+        let result = a.checked_add(&b).unwrap();
+        assert_eq!(result.data, vec![6, 8, 10, 12]);
+    }
+
+    #[test]
+    fn test_checked_add_mismatched_dims() {
+        let a = DMatrix::new(2, 2, vec![1, 2, 3, 4]);
+        let b = DMatrix::new(2, 3, vec![1, 2, 3, 4, 5, 6]);
+        let result = a.checked_add(&b);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_add_operator() {
+        let a = DMatrix::new(2, 2, vec![1, 2, 3, 4]);
+        let b = DMatrix::new(2, 2, vec![5, 6, 7, 8]);
+        // This tests the `Add` trait impl for references
+        let result = &a + &b;
+        assert_eq!(result.data, vec![6, 8, 10, 12]);
+        // This tests the `Add` trait impl for owned values
+        let result2 = a + b;
+        assert_eq!(result2.data, vec![6, 8, 10, 12]);
+    }
+
+    #[test]
+    fn test_mul_scalar() {
+        let m = DMatrix::new(2, 2, vec![1, -2, 3, -4]);
+        let result = m.mul_scalar(3);
+        assert_eq!(result.data, vec![3, -6, 9, -12]);
+    }
+
+    #[test]
+    fn test_matrix_multiplication() {
+        // A is 2x3
+        let a = DMatrix::new(2, 3, vec![1, 2, 3, 4, 5, 6]);
+        // B is 3x2
+        let b = DMatrix::new(3, 2, vec![7, 8, 9, 10, 11, 12]);
+        // Result should be 2x2
+        let result = a.mul(&b).unwrap();
+
+        // Expected result:
+        // [ (1*7 + 2*9 + 3*11), (1*8 + 2*10 + 3*12) ] = [ 58, 64 ]
+        // [ (4*7 + 5*9 + 6*11), (4*8 + 5*10 + 6*12) ] = [ 139, 154 ]
+        let expected = DMatrix::new(2, 2, vec![58, 64, 139, 154]);
+
+        assert_eq!(result.rows, expected.rows);
+        assert_eq!(result.cols, expected.cols);
+        assert_eq!(result.data, expected.data);
+    }
+
+    #[test]
+    fn test_mul_by_identity() {
+        let m = DMatrix::new(2, 3, vec![1, 2, 3, 4, 5, 6]);
+        let identity = DMatrix::<i32>::identity(3);
+        let result = m.mul(&identity).unwrap();
+
+        assert_eq!(result.data, m.data);
+    }
+
+    #[test]
+    fn test_mul_mismatched_dims() {
+        let a = DMatrix::new(2, 3, vec![1, 2, 3, 4, 5, 6]);
+        let b = DMatrix::new(2, 2, vec![1, 2, 3, 4]); // Inner dimensions 3 != 2
+        let result = a.mul(&b);
+
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            MatrixError::DimensionMismatch(r1, c1, r2, c2) => {
+                assert_eq!((r1, c1, r2, c2), (2, 3, 2, 2));
+            }
+            _ => panic!("Expected a DimensionMismatch error"),
+        }
     }
 }
