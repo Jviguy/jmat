@@ -1,0 +1,2 @@
+[workspace]
+members = ["crates/jmat-cli","crates/jmat-core", "crates/jmat-eval", "crates/jmat-parser"]
