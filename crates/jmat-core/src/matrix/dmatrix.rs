@@ -1,5 +1,5 @@
 ﻿use std::ops::{Add, Mul};
-use num_traits::{CheckedAdd, CheckedMul, Num, One, Zero};
+use num_traits::{CheckedAdd, Num, One, Zero};
 use crate::matrix::{Matrix, MatrixError};
 
 // Dynamic runtime matrix.
@@ -86,17 +86,27 @@ impl<T> Matrix for DMatrix<T> {
 }
 
 impl<T> Add<Self> for &DMatrix<T> where for <'a> &'a T: Add<&'a T, Output = T> {
-    type Output = Self;
+    type Output = DMatrix<T>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        &self.checked_add(rhs).expect("DMatrix dimensions do not match for addition.")
+        self.checked_add(rhs).expect("DMatrix dimensions do not match for addition.")
+    }
+}
+
+impl<T> Add<DMatrix<T>> for DMatrix<T>
+where
+        for<'a> &'a T: Add<&'a T, Output = T>,
+{
+    type Output = DMatrix<T>;
+    fn add(self, rhs: DMatrix<T>) -> Self::Output {
+        (&self).checked_add(&rhs).expect("DMatrix dimensions do not match for addition.")
     }
 }
 
 impl<T> CheckedAdd for DMatrix<T>
     where for <'a> &'a T: Add<&'a T, Output = T>{
     fn checked_add(&self, other: &Self) -> Option<DMatrix<T>> {
-        if (self.rows != other.rows || self.cols != other.cols) {
+        if self.rows != other.rows || self.cols != other.cols {
             None
         } else {
             let data = self.data.iter()
@@ -132,7 +142,7 @@ impl<T> DMatrix<T> {
             for j in 0..rhs.cols() {
                 let mut sum = O::zero();
                 for k in 0..self.cols() {
-                    let a = self.get(i, j).unwrap();
+                    let a = self.get(i, k).unwrap();
                     let b = rhs.get(k, j).unwrap();
                     sum = sum + (a * b)
                 }

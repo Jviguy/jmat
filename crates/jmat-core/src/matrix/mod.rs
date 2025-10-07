@@ -1,9 +1,6 @@
 ﻿use thiserror::Error;
-use crate::matrix::dmatrix::DMatrix;
-
 mod smatrix;
 mod dmatrix;
-mod dmatrix_test;
 
 #[derive(Error, Debug)]
 pub enum MatrixError {
