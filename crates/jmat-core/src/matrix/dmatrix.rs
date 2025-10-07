@@ -13,17 +13,17 @@ impl<T> DMatrix<T> {
     // Constructors.
     
     pub fn new(rows: usize, cols: usize, data: Vec<T>) -> DMatrix<T> {
+        assert_eq!(rows * cols, data.len(), "DMatrix::new: data length does not match dimensions.");
         DMatrix { rows, cols, data }
     }
     
-    pub fn empty(rows: usize, cols: usize) -> DMatrix<T> {
-        let data = Vec::with_capacity(rows * cols);
+    pub fn from_val(rows: usize, cols: usize, val: T) -> DMatrix<T> where T: Clone {
+        let data = vec![val; rows * cols];
         DMatrix { rows, cols, data }
     }
     
     pub fn zeros(rows: usize, cols: usize) -> DMatrix<T> where T: Zero + Clone {
-        let data = vec![T::zero(); rows * cols];
-        DMatrix { rows, cols, data }
+        Self::from_val(rows, cols, T::zero())
     }
     
     pub fn identity(n: usize) -> DMatrix<T> where T: Zero + One + Clone {
@@ -34,7 +34,7 @@ impl<T> DMatrix<T> {
         };
         res
     }
-    
+
     // Getters
 
     fn data(&self) -> &[T] {
@@ -44,7 +44,7 @@ impl<T> DMatrix<T> {
     fn data_mut(&mut self) -> &mut [T] {
         &mut self.data
     }
-    
+
     // Math
 }
 
@@ -109,7 +109,7 @@ impl<T> CheckedAdd for DMatrix<T> where T: Add<Output= T> + Clone {
 
 impl<T> Add<Self> for &DMatrix<T> where T: Add<T, Output = T> + Clone {
     type Output = DMatrix<T>;
-    
+
     fn add(self, rhs: Self) -> Self::Output {
         self.checked_add(&rhs).expect("DMatrix dimensions do not match for addition.")
     }
@@ -122,12 +122,12 @@ impl<T> DMatrix<T> {
             .collect();
         DMatrix { rows: self.rows, cols: self.cols, data }
     }
-    
-    pub fn mul<J, O>(&self, rhs: &DMatrix<J>) -> Result<DMatrix<O>, MatrixError> 
-    where T: Mul<J, Output = O>, 
+
+    pub fn mul<J, O>(&self, rhs: &DMatrix<J>) -> Result<DMatrix<O>, MatrixError>
+    where T: Mul<J, Output = O>,
         J: Mul<J, Output = J> + Clone,
         O: Mul<J, Output = O> + Clone
     {
-        
+
     }
 }
