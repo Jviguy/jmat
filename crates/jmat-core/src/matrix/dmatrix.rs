@@ -85,17 +85,17 @@ impl<T> Matrix for DMatrix<T> {
     }
 }
 
-impl<T> Add<&Self> for &DMatrix<T> where for <'a> &'a T: Add<&'a T, Output = T> {
-    type Output = DMatrix<T>;
+impl<T> Add<Self> for &DMatrix<T> where for <'a> &'a T: Add<&'a T, Output = T> {
+    type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        self.checked_add(rhs).expect("DMatrix dimensions do not match for addition.")
+        &self.checked_add(rhs).expect("DMatrix dimensions do not match for addition.")
     }
 }
 
 impl<T> CheckedAdd for DMatrix<T>
     where for <'a> &'a T: Add<&'a T, Output = T>{
-    fn checked_add(&self, other: &Self) -> Option<Self> {
+    fn checked_add(&self, other: &Self) -> Option<DMatrix<T>> {
         if (self.rows != other.rows || self.cols != other.cols) {
             None
         } else {
