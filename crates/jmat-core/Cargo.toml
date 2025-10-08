@@ -6,3 +6,8 @@ edition = "2024"
 [dependencies]
 num-traits = "0.2.19"
 thiserror = "2.0.17"
+
+[features]
+# Removes validation from macros and constructors of like matrices being same columns and etc.
+# can be helpful for preformance at runtime with DMatrix.
+no-validation = []

@@ -1,8 +1,13 @@
-﻿use std::ops::{Add, Mul};
-use num_traits::{CheckedAdd, Num, One, Zero};
+﻿use std::cmp::{max, min};
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::ops::{Add, Div, Mul, SubAssign};
+use num_traits::{CheckedAdd, Float, One, Signed, Zero};
 use crate::matrix::{Matrix, MatrixError};
 
 // Dynamic runtime matrix.
+// TODO: Check if Eq and Partial
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DMatrix<T> {
     rows: usize,
     cols: usize,
@@ -34,18 +39,6 @@ impl<T> DMatrix<T> {
         };
         res
     }
-
-    // Getters
-
-    fn data(&self) -> &[T] {
-        &self.data
-    }
-
-    fn data_mut(&mut self) -> &mut [T] {
-        &mut self.data
-    }
-
-    // Math
 }
 
 impl<T> Matrix for DMatrix<T> {
@@ -151,6 +144,203 @@ impl<T> DMatrix<T> {
         }
         Ok(DMatrix {rows: self.rows, cols: rhs.cols(), data: vec})
     }
+
+    fn row_swap(&mut self, r1: usize, r2: usize) {
+        if r1 == r2 || r1 >= self.rows || r2 >= self.rows {
+            return;
+        }
+        // Idk if this is gonna actually work
+        // but if it does its gonna be fast.
+        let (rs, rl) = (min(r1, r2), max(r1, r2));
+        let (first, second) = self.data.split_at_mut(rl * self.cols);
+        let row1 = &mut first[(rs * self.cols)..(rs + 1) * self.cols];
+        let row2 = &mut second[0..self.cols];
+        row1.swap_with_slice(row2)
+    }
+
+    pub fn row_echelon_form(&mut self)
+    where
+        T: Clone + Zero + PartialOrd + SubAssign<T> + Signed,
+        for<'a> &'a T: Div<&'a T, Output = T>,
+        for<'a> &'a T: Mul<T, Output = T>,
+    {
+        let (rows, cols) = (self.rows, self.cols);
+        let mut pivot_row = 0;
+        for pivot_col in 0..cols {
+            if pivot_row >= rows {
+                break;
+            }
+            let mut best_pivot_row = pivot_row;
+            for i in (pivot_row + 1)..rows {
+                // basically whatever has the greatest position number lol.
+                // in terms of highest number at the greatest
+                if self.get(i, pivot_col).unwrap().abs() > self.get(best_pivot_row, pivot_col).unwrap().abs() {
+                    best_pivot_row = i;
+                }
+            }
+            self.row_swap(pivot_row, best_pivot_row);
+            let pivot_val = self.get(pivot_row, pivot_col).unwrap().clone();
+            if pivot_val.is_zero() {
+                continue;
+            }
+
+            for i in (pivot_row + 1)..rows {
+                let current = self.get(i, pivot_col).unwrap();
+
+                let factor = current / &pivot_val;
+
+                for j in pivot_col..cols {
+                    let piv_value = self.get(pivot_row, j).unwrap().clone();
+                    let product = &factor * piv_value;
+                    self.data[i * cols + j].sub_assign(product)
+                }
+            }
+            pivot_row += 1;
+        }
+    }
+
+    pub fn to_ref(&self) -> DMatrix<T>
+    where
+        T: Clone + Zero + PartialOrd + SubAssign<T> + Signed,
+        for<'a> &'a T: Div<&'a T, Output = T>,
+        for<'a> &'a T: Mul<T, Output = T>,
+    {
+        let mut new = self.clone();
+        new.row_echelon_form();
+        new
+    }
+
+    /// Ensures no row swapping for ease of div, no scaling either.
+    /// This is useful for finding determinant using the property
+    /// det(A) = product of diagonals of u where u is ref of A.
+    /// Example of this:
+    /// ```no-run
+    /// let mut matrix = dmatrix![25.0, -3.0, 3.0; 5.0, 9.0, 6.0; 0.0, -15.0, -9.0];
+    /// matrix.naive_row_echelon_form();
+    /// let mut det = matrix.get(0, 0);
+    /// for i in 1..matrix.rows() {
+    ///     det *= matrix.get(i,i);
+    /// };
+    /// println!("Determinant: {}", det);
+    /// ```
+    pub fn naive_row_echelon_form(&mut self)
+    where
+        T: Clone + Zero + Signed,
+        for<'a> &'a T: Div<&'a T, Output = T>,
+        for<'a> &'a T: Mul<&'a T, Output = T>,
+        T: SubAssign<T>,
+    {
+        let (rows, cols) = (self.rows, self.cols);
+        let mut pivot_row = 0;
+        for pivot_col in 0..cols {
+            if pivot_row >= rows { break; }
+
+            // NOTE: The pivoting search and swap is removed.
+            // We just need to find the first non-zero row to be the pivot.
+            if self.get(pivot_row, pivot_col).unwrap().is_zero() {
+                let first_non_zero = ((pivot_row+1)..rows).find(|r| !self.get(*r, pivot_col).unwrap().is_zero());
+                if let Some(r) = first_non_zero {
+                    self.row_swap(pivot_row, r);
+                } else {
+                    continue; // Column is all zeros, move to next
+                }
+            }
+
+            let pivot_val = self.get(pivot_row, pivot_col).unwrap().clone();
+            if pivot_val.is_zero() {
+                continue;
+            }
+
+            for i in (pivot_row + 1)..rows {
+                let current_val_ref = self.get(i, pivot_col).unwrap();
+                let factor = current_val_ref / &pivot_val;
+
+                for j in pivot_col..cols {
+                    let val_from_pivot_row = self.get(pivot_row, j).unwrap().clone();
+                    let product = &factor * &val_from_pivot_row;
+                    self.data[i * cols + j].sub_assign(product);
+                }
+            }
+            pivot_row += 1;
+        }
+    }
+
+
+}
+
+impl<T> Display for DMatrix<T>
+where
+// We constrain this to `Float` types because handling near-zero values
+// and formatting decimals is a concept specific to floating-point numbers.
+// `Display` is needed to format the numbers themselves.
+    T: Float + Display,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut max_width = 0;
+        let mut formatted_nums = Vec::with_capacity(self.data.len());
+
+        for val in &self.data {
+            let s = if val.abs() <= T::epsilon() * T::from(100.0).unwrap() {
+                "0.0".to_string()
+            } else {
+                // Format other numbers with a reasonable precision.
+                format!("{:.4}", val)
+            };
+
+            if s.len() > max_width {
+                max_width = s.len();
+            }
+            formatted_nums.push(s);
+        }
+
+        // Building the final string.
+        writeln!(f)?; // Start with a newline for better spacing
+        for i in 0..self.rows {
+            write!(f, "[ ")?;
+            for j in 0..self.cols {
+                let s = &formatted_nums[i * self.cols + j];
+                // Pad each number with spaces to align the columns.
+                write!(f, "{: >width$}", s, width = max_width)?;
+                if j < self.cols - 1 {
+                    write!(f, "  ")?;
+                }
+            }
+            writeln!(f, " ]")?;
+        }
+
+        Ok(())
+    }
+}
+
+
+// Macros
+#[macro_export]
+macro_rules! dmatrix {
+    () => {
+        $crate::DMatrix::new(0, 0, vec![]);
+    };
+   ( $( $( $x:expr ),* );* ) => {
+        {
+            let data = vec![ $( $( $x ),* ),* ];
+
+            let rows_arr = [ $( [ $( $x ),* ] ),* ];
+
+            let row_count = rows_arr.len();
+            let mut col_count = 0;
+
+            if row_count > 0 {
+                col_count = rows_arr[0].len();
+            }
+            for r in 1..row_count {
+                assert_eq!(rows_arr[r].len(), col_count, "All rows in a dmatrix! \
+                macro must have the same number of columns.");
+            }
+            $crate::DMatrix::new(row_count, col_count, data)
+        }
+    };
+    ( $( $( $x:expr ),* );* ; ) => {
+        dmatrix![ $( $( $x ),* );* ]
+    };
 }
 
 #[cfg(test)]
@@ -277,5 +467,111 @@ mod tests {
             }
             _ => panic!("Expected a DimensionMismatch error"),
         }
+    }
+    /// A helper function to compare floating-point matrices for approximate equality.
+    /// Direct comparison with `==` can fail due to tiny floating-point inaccuracies.
+    fn assert_matrices_approx_equal(a: &DMatrix<f64>, b: &DMatrix<f64>, epsilon: f64) {
+        assert_eq!(a.rows(), b.rows(), "Matrix row counts do not match");
+        assert_eq!(a.cols(), b.cols(), "Matrix column counts do not match");
+
+        for i in 0..a.rows() {
+            for j in 0..a.cols() {
+                let val_a = a.get(i, j).unwrap();
+                let val_b = b.get(i, j).unwrap();
+                assert!(
+                    (val_a - val_b).abs() < epsilon,
+                    "Matrix values at ({}, {}) are not approximately equal: {} vs {}",
+                    i, j, val_a, val_b
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_row_echelon_form_standard() {
+        // A standard 3x3 matrix that requires elimination.
+        let mut matrix = DMatrix::new(3, 3, vec![
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+        ]);
+
+        // CORRECTED: This is the actual result of the implemented algorithm
+        // after pivoting on the initial '7.0' and subsequent eliminations.
+        let expected = DMatrix::new(3, 3, vec![
+            7.0, 8.0, 9.0,
+            0.0, 0.85714, 1.71428,
+            0.0, 0.0, 0.0,
+        ]);
+
+        matrix.row_echelon_form();
+
+        assert_matrices_approx_equal(&matrix, &expected, 1e-5);
+    }
+
+    #[test]
+    fn test_row_echelon_form_with_pivoting() {
+        // This matrix has a zero in the initial pivot position,
+        // forcing the algorithm to swap rows.
+        let mut matrix = DMatrix::new(3, 3, vec![
+            0.0, 2.0, 1.0,
+            1.0, -2.0, -3.0,
+            -1.0, 1.0, 2.0,
+        ]);
+
+        // CORRECTED: This is the actual result. The last element is -0.5, not 0.5.
+        let expected = DMatrix::new(3, 3, vec![
+            1.0, -2.0, -3.0,
+            0.0, 2.0,  1.0,
+            0.0, 0.0,  -0.5,
+        ]);
+
+        matrix.row_echelon_form();
+
+        assert_matrices_approx_equal(&matrix, &expected, 1e-5);
+    }
+
+    #[test]
+    fn test_to_ref_non_mutating() {
+        // Verifies that the out-of-place method `to_ref` works
+        // and does not modify the original matrix.
+        let original_matrix = DMatrix::new(2, 3, vec![
+            1.0, 2.0, -1.0,
+            0.0, 1.0, 1.0,
+        ]);
+
+        // Create a clone to verify the original is untouched.
+        let original_clone = original_matrix.clone();
+
+        let expected_ref = DMatrix::new(2, 3, vec![
+            1.0, 2.0, -1.0,
+            0.0, 1.0, 1.0,
+        ]);
+
+        // The matrix is already in REF, so the result should be the same.
+        let ref_matrix = original_matrix.to_ref();
+
+        // Check that the result is correct.
+        assert_matrices_approx_equal(&ref_matrix, &expected_ref, 1e-5);
+        // CRITICAL: Check that the original matrix was not changed.
+        assert_eq!(&original_matrix, &original_clone, "The original matrix was modified!");
+    }
+
+    #[test]
+    fn test_row_echelon_form_wide_matrix() {
+        // A "wide" matrix (more columns than rows)
+        let mut matrix = DMatrix::new(2, 4, vec![
+            2.0, 1.0, -1.0, 8.0,
+            -3.0, -1.0, 2.0, -11.0,
+        ]);
+
+        let expected = DMatrix::new(2, 4, vec![
+            2.0, 1.0, -1.0, 8.0,
+            0.0, 0.5, 0.5, 1.0,
+        ]);
+
+        matrix.row_echelon_form();
+
+        assert_matrices_approx_equal(&matrix, &expected, 1e-5);
     }
 }

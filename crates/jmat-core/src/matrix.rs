@@ -1,6 +1,6 @@
 ﻿use thiserror::Error;
-mod smatrix;
-mod dmatrix;
+pub mod smatrix;
+pub mod dmatrix;
 
 #[derive(Error, Debug)]
 pub enum MatrixError {
