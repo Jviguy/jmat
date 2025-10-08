@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::{Add, Div, Mul, SubAssign};
 use num_traits::{CheckedAdd, Float, One, Signed, Zero};
 use crate::matrix::{Matrix, MatrixError};
+use crate::scalar::{NumericScalar, Scalar};
 
 // Dynamic runtime matrix.
 // TODO: Check if Eq and Partial
@@ -27,17 +28,30 @@ impl<T> DMatrix<T> {
         DMatrix { rows, cols, data }
     }
     
-    pub fn zeros(rows: usize, cols: usize) -> DMatrix<T> where T: Zero + Clone {
+    pub fn zeros(rows: usize, cols: usize) -> DMatrix<T> where T: Scalar {
         Self::from_val(rows, cols, T::zero())
     }
     
-    pub fn identity(n: usize) -> DMatrix<T> where T: Zero + One + Clone {
+    pub fn identity(n: usize) -> DMatrix<T> where T: Scalar {
         // make an n x n all zero matrix.
         let mut res = Self::zeros(n, n);
         for i in 0..n {
             res.data[i * n + i] = T::one();
         };
         res
+    }
+
+    // Utils No matter what T is.
+    fn row_swap(&mut self, r1: usize, r2: usize) {
+        if r1 == r2 || r1 >= self.rows || r2 >= self.rows {
+            return;
+        }
+
+        let (rs, rl) = (min(r1, r2), max(r1, r2));
+        let (first, second) = self.data.split_at_mut(rl * self.cols);
+        let row1 = &mut first[(rs * self.cols)..(rs + 1) * self.cols];
+        let row2 = &mut second[0..self.cols];
+        row1.swap_with_slice(row2)
     }
 }
 
@@ -78,7 +92,7 @@ impl<T> Matrix for DMatrix<T> {
     }
 }
 
-impl<T> Add<Self> for &DMatrix<T> where for <'a> &'a T: Add<&'a T, Output = T> {
+impl<T: Scalar> Add<Self> for &DMatrix<T> where for <'a> &'a T: Add<&'a T, Output = T> {
     type Output = DMatrix<T>;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -86,7 +100,7 @@ impl<T> Add<Self> for &DMatrix<T> where for <'a> &'a T: Add<&'a T, Output = T> {
     }
 }
 
-impl<T> Add<DMatrix<T>> for DMatrix<T>
+impl<T: Scalar> Add<DMatrix<T>> for DMatrix<T>
 where
         for<'a> &'a T: Add<&'a T, Output = T>,
 {
@@ -96,7 +110,7 @@ where
     }
 }
 
-impl<T> CheckedAdd for DMatrix<T>
+impl<T: Scalar> CheckedAdd for DMatrix<T>
     where for <'a> &'a T: Add<&'a T, Output = T>{
     fn checked_add(&self, other: &Self) -> Option<DMatrix<T>> {
         if self.rows != other.rows || self.cols != other.cols {
@@ -111,10 +125,10 @@ impl<T> CheckedAdd for DMatrix<T>
     }
 }
 
-impl<T> DMatrix<T> {
-    pub fn mul_scalar<K: Copy>(&self, k: K) -> DMatrix<T> where T: Mul<K, Output = T> + Clone {
+impl<T: Scalar> DMatrix<T> {
+    pub fn mul_scalar<K: Scalar>(&self, k: K) -> DMatrix<T> where T: Mul<K, Output = T> + Clone {
         let data = self.data.iter()
-            .map(|a| a.clone() * k)
+            .map(|a| a.clone() * k.clone())
             .collect();
         DMatrix { rows: self.rows, cols: self.cols, data }
     }
@@ -145,24 +159,17 @@ impl<T> DMatrix<T> {
         Ok(DMatrix {rows: self.rows, cols: rhs.cols(), data: vec})
     }
 
-    fn row_swap(&mut self, r1: usize, r2: usize) {
-        if r1 == r2 || r1 >= self.rows || r2 >= self.rows {
-            return;
-        }
-        // Idk if this is gonna actually work
-        // but if it does its gonna be fast.
-        let (rs, rl) = (min(r1, r2), max(r1, r2));
-        let (first, second) = self.data.split_at_mut(rl * self.cols);
-        let row1 = &mut first[(rs * self.cols)..(rs + 1) * self.cols];
-        let row2 = &mut second[0..self.cols];
-        row1.swap_with_slice(row2)
-    }
 
+
+
+}
+
+impl<T: NumericScalar> DMatrix<T> {
     pub fn row_echelon_form(&mut self)
     where
-        T: Clone + Zero + PartialOrd + SubAssign<T> + Signed,
         for<'a> &'a T: Div<&'a T, Output = T>,
         for<'a> &'a T: Mul<T, Output = T>,
+        T: SubAssign<T>,
     {
         let (rows, cols) = (self.rows, self.cols);
         let mut pivot_row = 0;
@@ -174,7 +181,7 @@ impl<T> DMatrix<T> {
             for i in (pivot_row + 1)..rows {
                 // basically whatever has the greatest position number lol.
                 // in terms of highest number at the greatest
-                if self.get(i, pivot_col).unwrap().abs() > self.get(best_pivot_row, pivot_col).unwrap().abs() {
+                if self.get(i, pivot_col).unwrap() > self.get(best_pivot_row, pivot_col).unwrap() {
                     best_pivot_row = i;
                 }
             }
@@ -201,7 +208,6 @@ impl<T> DMatrix<T> {
 
     pub fn to_ref(&self) -> DMatrix<T>
     where
-        T: Clone + Zero + PartialOrd + SubAssign<T> + Signed,
         for<'a> &'a T: Div<&'a T, Output = T>,
         for<'a> &'a T: Mul<T, Output = T>,
     {
@@ -225,7 +231,6 @@ impl<T> DMatrix<T> {
     /// ```
     pub fn naive_row_echelon_form(&mut self)
     where
-        T: Clone + Zero + Signed,
         for<'a> &'a T: Div<&'a T, Output = T>,
         for<'a> &'a T: Mul<&'a T, Output = T>,
         T: SubAssign<T>,
@@ -264,8 +269,6 @@ impl<T> DMatrix<T> {
             pivot_row += 1;
         }
     }
-
-
 }
 
 impl<T> Display for DMatrix<T>
