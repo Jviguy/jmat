@@ -30,6 +30,9 @@ version = "0.1.0"
 [[package]]
 name = "jmat-parser"
 version = "0.1.0"
+dependencies = [
+ "jmat-core",
+]
 
 [[package]]
 name = "num-traits"
