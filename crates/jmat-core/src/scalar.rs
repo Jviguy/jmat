@@ -1,5 +1,5 @@
 ﻿use std::ops::{Add, Div, Mul, Neg};
-use num_traits::{One, Signed, Zero};
+use num_traits::{Num, One, Signed, Zero};
 
 pub trait Scalar:
 Clone
@@ -10,7 +10,7 @@ Clone
 + Div<Output = Self>
 + Neg<Output = Self> {}
 
-pub trait NumericScalar: Scalar + PartialOrd + Signed {}
+pub trait NumericScalar: Scalar + Num + Signed + PartialOrd {}
 
 macro_rules! impl_scalar_for {
     ($($t:ty),*) => {

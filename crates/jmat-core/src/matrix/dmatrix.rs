@@ -2,7 +2,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, Div, Mul, SubAssign};
-use num_traits::{CheckedAdd, Float, One, Signed, Zero};
+use num_traits::{CheckedAdd, Float, Zero};
 use crate::matrix::{Matrix, MatrixError};
 use crate::scalar::{NumericScalar, Scalar};
 
@@ -159,9 +159,50 @@ impl<T: Scalar> DMatrix<T> {
         Ok(DMatrix {rows: self.rows, cols: rhs.cols(), data: vec})
     }
 
+    /// Ensures no row swapping for ease of div, no scaling either.
+    /// This is used for symbolic ref. As we can't do any ordering.
+    /// This is useful for users by finding determinant using the property
+    /// det(A) = product of diagonals of u where u is ref of A.
+    pub fn naive_row_echelon_form(&mut self)
+    where
+            for<'a> &'a T: Div<&'a T, Output = T>,
+            for<'a> &'a T: Mul<&'a T, Output = T>,
+            T: SubAssign<T>,
+    {
+        let (rows, cols) = (self.rows, self.cols);
+        let mut pivot_row = 0;
+        for pivot_col in 0..cols {
+            if pivot_row >= rows { break; }
 
+            // NOTE: The pivoting search and swap is removed.
+            // We just need to find the first non-zero row to be the pivot.
+            if self.get(pivot_row, pivot_col).unwrap().is_zero() {
+                let first_non_zero = ((pivot_row+1)..rows).find(|r| !self.get(*r, pivot_col).unwrap().is_zero());
+                if let Some(r) = first_non_zero {
+                    self.row_swap(pivot_row, r);
+                } else {
+                    continue; // Column is all zeros, move to next
+                }
+            }
 
+            let pivot_val = self.get(pivot_row, pivot_col).unwrap().clone();
+            if pivot_val.is_zero() {
+                continue;
+            }
 
+            for i in (pivot_row + 1)..rows {
+                let current_val_ref = self.get(i, pivot_col).unwrap();
+                let factor = current_val_ref / &pivot_val;
+
+                for j in pivot_col..cols {
+                    let val_from_pivot_row = self.get(pivot_row, j).unwrap().clone();
+                    let product = &factor * &val_from_pivot_row;
+                    self.data[i * cols + j].sub_assign(product);
+                }
+            }
+            pivot_row += 1;
+        }
+    }
 }
 
 impl<T: NumericScalar> DMatrix<T> {
@@ -210,64 +251,11 @@ impl<T: NumericScalar> DMatrix<T> {
     where
         for<'a> &'a T: Div<&'a T, Output = T>,
         for<'a> &'a T: Mul<T, Output = T>,
+        T: SubAssign<T>,
     {
         let mut new = self.clone();
         new.row_echelon_form();
         new
-    }
-
-    /// Ensures no row swapping for ease of div, no scaling either.
-    /// This is useful for finding determinant using the property
-    /// det(A) = product of diagonals of u where u is ref of A.
-    /// Example of this:
-    /// ```no-run
-    /// let mut matrix = dmatrix![25.0, -3.0, 3.0; 5.0, 9.0, 6.0; 0.0, -15.0, -9.0];
-    /// matrix.naive_row_echelon_form();
-    /// let mut det = matrix.get(0, 0);
-    /// for i in 1..matrix.rows() {
-    ///     det *= matrix.get(i,i);
-    /// };
-    /// println!("Determinant: {}", det);
-    /// ```
-    pub fn naive_row_echelon_form(&mut self)
-    where
-        for<'a> &'a T: Div<&'a T, Output = T>,
-        for<'a> &'a T: Mul<&'a T, Output = T>,
-        T: SubAssign<T>,
-    {
-        let (rows, cols) = (self.rows, self.cols);
-        let mut pivot_row = 0;
-        for pivot_col in 0..cols {
-            if pivot_row >= rows { break; }
-
-            // NOTE: The pivoting search and swap is removed.
-            // We just need to find the first non-zero row to be the pivot.
-            if self.get(pivot_row, pivot_col).unwrap().is_zero() {
-                let first_non_zero = ((pivot_row+1)..rows).find(|r| !self.get(*r, pivot_col).unwrap().is_zero());
-                if let Some(r) = first_non_zero {
-                    self.row_swap(pivot_row, r);
-                } else {
-                    continue; // Column is all zeros, move to next
-                }
-            }
-
-            let pivot_val = self.get(pivot_row, pivot_col).unwrap().clone();
-            if pivot_val.is_zero() {
-                continue;
-            }
-
-            for i in (pivot_row + 1)..rows {
-                let current_val_ref = self.get(i, pivot_col).unwrap();
-                let factor = current_val_ref / &pivot_val;
-
-                for j in pivot_col..cols {
-                    let val_from_pivot_row = self.get(pivot_row, j).unwrap().clone();
-                    let product = &factor * &val_from_pivot_row;
-                    self.data[i * cols + j].sub_assign(product);
-                }
-            }
-            pivot_row += 1;
-        }
     }
 }
 
