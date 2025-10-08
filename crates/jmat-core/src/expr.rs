@@ -80,7 +80,6 @@ impl Expr {
             Expr::Neg(a) => {
                 let new = a.simplify();
                 match new {
-                    
                     Expr::Num(n) => Self::make_num(-n),
                     _ => new.clone()
                 }
