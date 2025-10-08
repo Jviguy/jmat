@@ -1,7 +1,7 @@
 ﻿use std::fmt::{Display, Formatter};
 use num_traits::{One, Zero};
 use crate::DMatrix;
-use crate::scalar::{NumericScalar, Scalar};
+use crate::scalar::{Scalar};
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expr {
@@ -26,15 +26,6 @@ impl Expr {
         }
     }
     
-    pub fn matrix(name: char, m: usize, n: usize) -> DMatrix<Self> {
-        let mut data: Vec<Self> = Vec::with_capacity(m * n);
-        for i in 0..m {
-            for j in 0..n {
-                data.push(Self::Symbol(format!("{}_{},{}", name, i+1, j+1)));
-            }
-        }
-        DMatrix::new(m, n, data)
-    }
     
     pub fn simplify(&self) -> Self {
         match self {
@@ -62,6 +53,12 @@ impl Expr {
                     (Expr::One, Expr::One) => Self::One,
                     (Expr::One, _) => rhs,
                     (_, Expr::One) => lhs,
+                    (Expr::Num(a), rhs) if *a == -1.0 => {
+                        Self::Neg(Box::new(rhs.clone()))
+                    },
+                    (lhs, Expr::Num(b)) if *b == -1.0 => {
+                        Self::Neg(Box::new(lhs.clone()))
+                    },
                     (Expr::Num(a), Expr::Num(b)) => Self::make_num(a * b),
                     _ => Self::Mul(Box::new(lhs), Box::new(rhs))
                 }
@@ -70,18 +67,19 @@ impl Expr {
                 let lhs = a.simplify();
                 let rhs = b.simplify();
                 match (&lhs, &rhs) {
+                    (a,b) if a == b => Self::One,
                     (Expr::Zero, _) => Self::Zero,
-                    (_, Expr::Zero) => panic!("division by zero symbolically."),
                     (_, Expr::One) => lhs,
                     (Expr::Num(a), Expr::Num(b)) => Self::make_num(a / b),
                     _ => Self::Div(Box::new(lhs), Box::new(rhs))
                 }
             }
             Expr::Neg(a) => {
-                let new = a.simplify();
-                match new {
+                let inner = a.simplify();
+                match inner {
+                    Expr::Neg(a) => *a,
                     Expr::Num(n) => Self::make_num(-n),
-                    _ => new.clone()
+                    _ => Expr::Neg(Box::new(inner))
                 }
             }
             _ => self.clone(),
@@ -214,17 +212,6 @@ mod tests {
         assert_eq!(Expr::make_num(-3.14), Expr::Num(-3.14));
     }
 
-    #[test]
-    fn test_matrix_factory() {
-        let matrix = Expr::matrix('A', 2, 3);
-
-        assert_eq!(matrix.rows(), 2);
-        assert_eq!(matrix.cols(), 3);
-
-        // Check a few symbol names to ensure correct generation
-        assert_eq!(matrix.get(0, 0), Some(&Expr::Symbol("A_1,1".to_string())));
-        assert_eq!(matrix.get(1, 2), Some(&Expr::Symbol("A_2,3".to_string())));
-    }
 
     #[test]
     fn test_display_formatting() {
@@ -283,5 +270,103 @@ mod tests {
 
         let num_expr = Expr::Num(5.0);
         assert!(!num_expr.is_zero());
+    }
+    // Helper functions to make test expressions more readable
+    fn sym(s: &str) -> Expr { Expr::Symbol(s.to_string()) }
+    fn num(n: f64) -> Expr { Expr::make_num(n) }
+    fn add(a: Expr, b: Expr) -> Expr { Expr::Add(Box::new(a), Box::new(b)) }
+    fn mul(a: Expr, b: Expr) -> Expr { Expr::Mul(Box::new(a), Box::new(b)) }
+    fn div(a: Expr, b: Expr) -> Expr { Expr::Div(Box::new(a), Box::new(b)) }
+    fn neg(a: Expr) -> Expr { Expr::Neg(Box::new(a)) }
+
+    #[test]
+    fn test_simplify_addition() {
+        assert_eq!(add(sym("x"), num(0.0)).simplify(), sym("x"));
+        assert_eq!(add(num(0.0), sym("y")).simplify(), sym("y"));
+        assert_eq!(add(num(5.0), num(3.0)).simplify(), num(8.0));
+        assert_eq!(add(num(1.0), num(1.0)).simplify(), num(2.0));
+        // Recursive
+        assert_eq!(add(add(sym("x"), num(2.0)), num(0.0)).simplify(), add(sym("x"), num(2.0)));
+    }
+
+    #[test]
+    fn test_simplify_multiplication() {
+        assert_eq!(mul(sym("x"), num(0.0)).simplify(), num(0.0));
+        assert_eq!(mul(num(0.0), sym("y")).simplify(), num(0.0));
+        assert_eq!(mul(sym("x"), num(1.0)).simplify(), sym("x"));
+        assert_eq!(mul(num(1.0), sym("y")).simplify(), sym("y"));
+        assert_eq!(mul(num(4.0), num(3.0)).simplify(), num(12.0));
+        // Multiplication by -1
+        assert_eq!(mul(sym("x"), num(-1.0)).simplify(), neg(sym("x")));
+        assert_eq!(mul(num(-1.0), sym("y")).simplify(), neg(sym("y")));
+    }
+
+    #[test]
+    fn test_simplify_division() {
+        assert_eq!(div(sym("x"), num(1.0)).simplify(), sym("x"));
+        assert_eq!(div(num(0.0), sym("y")).simplify(), num(0.0));
+        assert_eq!(div(num(10.0), num(2.0)).simplify(), num(5.0));
+        // Identity: x / x = 1
+        assert_eq!(div(sym("x"), sym("x")).simplify(), num(1.0));
+        let complex_expr = add(sym("y"), num(5.0));
+        assert_eq!(div(complex_expr.clone(), complex_expr).simplify(), num(1.0));
+        // Symbolic division by zero should not panic
+        assert_eq!(div(sym("x"), num(0.0)).simplify(), div(sym("x"), num(0.0)));
+    }
+
+    #[test]
+    fn test_simplify_negation() {
+        assert_eq!(neg(num(5.0)).simplify(), num(-5.0));
+        // Double negation: -(-x) = x
+        assert_eq!(neg(neg(sym("x"))).simplify(), sym("x"));
+        assert_eq!(neg(neg(add(sym("x"), num(1.0)))) .simplify(), add(sym("x"), num(1.0)));
+    }
+
+    #[test]
+    fn test_simplify_complex_nested_expressions() {
+        // (x * 1) + (y + 0) -> x + y
+        let expr1 = add(mul(sym("x"), num(1.0)), add(sym("y"), num(0.0)));
+        assert_eq!(expr1.simplify(), add(sym("x"), sym("y")));
+
+        // -(-( (x + 0) * 1 )) -> x
+        let expr2 = neg(neg(mul(add(sym("x"), num(0.0)), num(1.0))));
+        assert_eq!(expr2.simplify(), sym("x"));
+
+        // ( (x * 0) + 5) / 1 -> 5
+        let expr3 = div(add(mul(sym("x"), num(0.0)), num(5.0)), num(1.0));
+        assert_eq!(expr3.simplify(), num(5.0));
+    }
+
+    #[test]
+    fn test_substitute() {
+        let mut expr = add(sym("x"), mul(sym("y"), sym("x")));
+
+        // Substitute x with 5.0
+        expr.substitute(&"x".to_string(), 5.0);
+        assert_eq!(expr, add(num(5.0), mul(sym("y"), num(5.0))));
+
+        // Substitute y with 2.0
+        expr.substitute(&"y".to_string(), 2.0);
+        assert_eq!(expr, add(num(5.0), mul(num(2.0), num(5.0))));
+    }
+
+    #[test]
+    fn test_substitute_and_simplify() {
+        // Evaluate (a * b) + a where a=5, b=0
+        let mut expr = add(mul(sym("a"), sym("b")), sym("a"));
+
+        // Substitute
+        expr.substitute(&"a".to_string(), 5.0);
+        expr.substitute(&"b".to_string(), 0.0);
+
+        // After substitution: (5 * 0) + 5
+        let expected_substituted = add(mul(num(5.0), num(0.0)), num(5.0));
+        assert_eq!(expr, expected_substituted);
+
+        // Simplify
+        let final_result = expr.simplify();
+
+        // Expected final: 0 + 5 -> 5
+        assert_eq!(final_result, num(5.0));
     }
 }

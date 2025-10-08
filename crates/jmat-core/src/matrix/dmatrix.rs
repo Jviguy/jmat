@@ -3,6 +3,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, Div, Mul, SubAssign};
 use num_traits::{CheckedAdd, Float, Zero};
+use crate::expr::Expr;
 use crate::matrix::{Matrix, MatrixError};
 use crate::scalar::{NumericScalar, Scalar};
 
@@ -41,6 +42,7 @@ impl<T> DMatrix<T> {
         res
     }
 
+
     // Utils No matter what T is.
     fn row_swap(&mut self, r1: usize, r2: usize) {
         if r1 == r2 || r1 >= self.rows || r2 >= self.rows {
@@ -52,6 +54,27 @@ impl<T> DMatrix<T> {
         let row1 = &mut first[(rs * self.cols)..(rs + 1) * self.cols];
         let row2 = &mut second[0..self.cols];
         row1.swap_with_slice(row2)
+    }
+}
+
+impl DMatrix<Expr> {
+    pub fn symbolic(name: char, m: usize, n: usize) -> DMatrix<Expr> {
+        let mut data = Vec::with_capacity(m * n);
+        for i in 0..m {
+            for j in 0..n {
+                data.push(Expr::Symbol(format!("{}_{},{}", name, i+1, j+1)));
+            }
+        }
+        DMatrix { rows: m, cols: n, data }
+    }
+
+    pub fn symbolic_identity(n: usize) -> DMatrix<Expr> {
+        let mut data = vec![Expr::Zero; n*n];
+        for i in 0..n {
+            data[i*n + i] = Expr::One;
+        }
+
+        DMatrix{ rows: n, cols:n, data }
     }
 }
 
@@ -564,5 +587,17 @@ mod tests {
         matrix.row_echelon_form();
 
         assert_matrices_approx_equal(&matrix, &expected, 1e-5);
+    }
+    
+    #[test]
+    fn test_matrix_factory() {
+        let matrix = DMatrix::symbolic('A', 2, 3);
+
+        assert_eq!(matrix.rows(), 2);
+        assert_eq!(matrix.cols(), 3);
+
+        // Check a few symbol names to ensure correct generation
+        assert_eq!(matrix.get(0, 0), Some(&Expr::Symbol("A_1,1".to_string())));
+        assert_eq!(matrix.get(1, 2), Some(&Expr::Symbol("A_2,3".to_string())));
     }
 }
