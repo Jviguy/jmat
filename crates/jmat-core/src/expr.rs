@@ -36,8 +36,57 @@ impl Expr {
         DMatrix::new(m, n, data)
     }
     
-    pub fn simplify(&mut self) {
-        
+    pub fn simplify(&self) -> Self {
+        match self {
+            Expr::Num(n) => {
+                Self::make_num(*n)
+            }
+            Expr::Add(a, b) => {
+                let lhs = a.simplify();
+                let rhs = b.simplify();
+                // Addition we can only simplify addition by 0. and simple cases like 1 + 1 and nums.
+                match (&lhs, &rhs) {
+                    (Expr::Zero, _) => rhs,
+                    (_, Expr::Zero) => lhs,
+                    (Expr::One, Expr::One) => Self::make_num(2.0),
+                    (Expr::Num(a), Expr::Num(b)) => Self::make_num(a + b),
+                    _ => Self::Add(Box::new(lhs), Box::new(rhs))
+                }
+            }
+            Expr::Mul(a, b) => {
+                let lhs = a.simplify();
+                let rhs = b.simplify();
+                match (&lhs, &rhs) {
+                    (Expr::Zero, _) => Self::Zero,
+                    (_, Expr::Zero) => Self::Zero,
+                    (Expr::One, Expr::One) => Self::One,
+                    (Expr::One, _) => rhs,
+                    (_, Expr::One) => lhs,
+                    (Expr::Num(a), Expr::Num(b)) => Self::make_num(a * b),
+                    _ => Self::Mul(Box::new(lhs), Box::new(rhs))
+                }
+            }
+            Expr::Div(a, b) => {
+                let lhs = a.simplify();
+                let rhs = b.simplify();
+                match (&lhs, &rhs) {
+                    (Expr::Zero, _) => Self::Zero,
+                    (_, Expr::Zero) => panic!("division by zero symbolically."),
+                    (_, Expr::One) => lhs,
+                    (Expr::Num(a), Expr::Num(b)) => Self::make_num(a / b),
+                    _ => Self::Div(Box::new(lhs), Box::new(rhs))
+                }
+            }
+            Expr::Neg(a) => {
+                let new = a.simplify();
+                match new {
+                    
+                    Expr::Num(n) => Self::make_num(-n),
+                    _ => new.clone()
+                }
+            }
+            _ => self.clone(),
+        }
     }
     
     pub fn substitute(&mut self, name: &String, val: f64) {
